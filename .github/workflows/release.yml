@@ -1,0 +1,71 @@
+name: release
+
+# Automated release on git tags:
+#
+#   git tag v1.3.0 && git push origin v1.3.0
+#
+# Two deployment modes (pick one per repo):
+#
+#   A) Webhook mode (recommended): the control API runs next to the
+#      deployment host (`bgdeploy api`). Set repository secrets
+#      CONTROL_API_URL (e.g. https://deploy.example.com) and
+#      BG_WEBHOOK_TOKEN, and this workflow POSTs the tag to
+#      /api/webhook/github where the deploy job is queued and the
+#      blue/green rollout runs. Rollbacks stay manual via the web UI.
+#
+#   B) Self-hosted runner mode: put this repo on a self-hosted runner that has
+#      docker/podman and run `bgdeploy deploy` directly there (swap the
+#      step below).
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  verify:
+    name: test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-dev.txt
+      - name: Run test suite
+        run: python -m pytest
+
+  deploy:
+    name: deploy ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    needs: verify
+    env:
+      VERSION: ${{ github.ref_name }}            # e.g. v1.3.0
+      CONTROL_API_URL: ${{ secrets.CONTROL_API_URL }}   # empty when unset
+      BG_WEBHOOK_TOKEN: ${{ secrets.BG_WEBHOOK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Mode A: trigger the control API webhook (hosted runners) ---
+      - name: Trigger deploy through the control API webhook
+        if: env.CONTROL_API_URL != ''
+        run: |
+          payload="{\"ref\":\"refs/tags/$VERSION\",\"repository\":{\"name\":\"${{ github.event.repository.name }}\"}}"
+          curl -sf -X POST "$CONTROL_API_URL/api/webhook/github" \
+            -H "Content-Type: application/json" \
+            -H "X-Bg-Token: $BG_WEBHOOK_TOKEN" \
+            -d "$payload"
+          echo "deploy of $VERSION queued on $CONTROL_API_URL"
+
+      # --- Mode B: deploy straight from a self-hosted runner ---
+      # (remove the Mode A step above and uncomment the two steps below)
+      # - uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.12"
+      # - name: Deploy ${{ github.ref_name }} (self-hosted engine)
+      #   if: env.CONTROL_API_URL == ''
+      #   run: |
+      #     pip install -e . -r requirements-dev.txt
+      #     bgdeploy deploy --version "$VERSION"

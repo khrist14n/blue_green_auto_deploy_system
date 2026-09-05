@@ -1,0 +1,5 @@
+pytest>=8.0
+aiohttp>=3.9
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27

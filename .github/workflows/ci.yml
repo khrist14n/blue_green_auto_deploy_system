@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: unit & integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-dev.txt
+      - name: Run test suite
+        run: python -m pytest
+
+  smoke-deploy:
+    name: containerized blue/green smoke deploy
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      BG_SHIFT_DWELL: "2.0"    # > the router's 1s weights poll interval
+      BG_VERIFY_SAMPLES: "6"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bgdeploy
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-dev.txt
+      - name: Deploy v1.0.0 (bootstrap -> blue)
+        run: bgdeploy deploy --version v1.0.0
+      - name: Traffic is served by blue v1.0.0
+        run: |
+          curl -sf http://127.0.0.1:8080/version | grep -q '"version":"v1.0.0"'
+          curl -sfI http://127.0.0.1:8080/version | grep -qi 'X-Served-By: blue'
+      - name: Deploy v2.0.0 (shift -> green)
+        run: bgdeploy deploy --version v2.0.0
+      - name: Traffic is served by green v2.0.0
+        run: |
+          curl -sf http://127.0.0.1:8080/version | grep -q '"version":"v2.0.0"'
+          curl -sfI http://127.0.0.1:8080/version | grep -qi 'X-Served-By: green'
+      - name: Rollback to v1.0.0
+        run: bgdeploy rollback
+      - name: Traffic is back on blue v1.0.0
+        run: |
+          curl -sf http://127.0.0.1:8080/version | grep -q '"version":"v1.0.0"'
+          curl -sfI http://127.0.0.1:8080/version | grep -qi 'X-Served-By: blue'
+      - name: Show final state
+        run: bgdeploy status
+      - name: Clean up containers/network/data
+        if: always()
+        run: |
+          docker rm -f $(docker ps -aq --filter label=bgdeploy.managed=true) 2>/dev/null || true
+          docker network rm bgdeploy 2>/dev/null || true
+
+  podman-smoke-deploy:
+    name: containerized blue/green smoke deploy (podman)
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      BG_ENGINE: podman
+      BG_SHIFT_DWELL: "2.0"    # > the router's 1s weights poll interval
+      BG_VERIFY_SAMPLES: "6"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          podman version
+          podman info >/dev/null
+      - name: Install bgdeploy
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-dev.txt
+      - name: Run test suite (podman selected)
+        run: python -m pytest
+      - name: Deploy v1.0.0 (bootstrap -> blue) on podman
+        run: bgdeploy deploy --engine podman --version v1.0.0
+      - name: Traffic is served by blue v1.0.0
+        run: |
+          curl -sf http://127.0.0.1:8080/version | grep -q '"version":"v1.0.0"'
+          curl -sfI http://127.0.0.1:8080/version | grep -qi 'X-Served-By: blue'
+      - name: Deploy v2.0.0 (shift -> green) on podman
+        run: bgdeploy deploy --engine podman --version v2.0.0
+      - name: Traffic is served by green v2.0.0
+        run: |
+          curl -sf http://127.0.0.1:8080/version | grep -q '"version":"v2.0.0"'
+          curl -sfI http://127.0.0.1:8080/version | grep -qi 'X-Served-By: green'
+      - name: Rollback to v1.0.0 on podman
+        run: bgdeploy rollback --engine podman
+      - name: Traffic is back on blue v1.0.0
+        run: |
+          curl -sf http://127.0.0.1:8080/version | grep -q '"version":"v1.0.0"'
+          curl -sfI http://127.0.0.1:8080/version | grep -qi 'X-Served-By: blue'
+      - name: Show final state
+        run: bgdeploy status
+      - name: Clean up containers/network/data
+        if: always()
+        run: |
+          podman rm -f $(podman ps -aq --filter label=bgdeploy.managed=true) 2>/dev/null || true
+          podman network rm bgdeploy 2>/dev/null || true

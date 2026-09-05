@@ -1,0 +1,23 @@
+[
+  {
+    "name": "root-returns-service-info",
+    "method": "GET",
+    "path": "/",
+    "expected_status": 200,
+    "contains": ["service", "version"]
+  },
+  {
+    "name": "healthz-liveness",
+    "method": "GET",
+    "path": "/healthz",
+    "expected_status": 200,
+    "contains": ["ok"]
+  },
+  {
+    "name": "version-endpoint-matches-deploy",
+    "method": "GET",
+    "path": "/version",
+    "expected_status": 200,
+    "contains": ["{version}", "ok"]
+  }
+]

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bgdeploy"
+version = "1.0.0"
+description = "Blue/green auto-deployment system with traffic shifting, smoke tests, rollback and auto-recovery"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+bgdeploy = "bgdeploy.cli:main"
+
+[tool.setuptools]
+packages = ["bgdeploy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Real-deploy tests need a container engine and rebuild images, so they are
+# opt-in:  pytest -m realdeploy   (the CLI -m overrides the addopts default)
+addopts = "-q -m 'not realdeploy'"
+markers = [
+    "realdeploy: full blue/green pipeline against a real container engine (pytest -m realdeploy)",
+]
